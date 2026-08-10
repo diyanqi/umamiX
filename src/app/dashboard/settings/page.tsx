@@ -16,7 +16,13 @@ export const metadata: Metadata = {
   title: "设置",
 };
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const billingSuccess = params.billing === "success";
   const session = await auth();
   if (!session?.user?.id) redirect("/signin");
 
@@ -58,6 +64,12 @@ export default async function SettingsPage() {
         <h1 className="text-xl font-semibold">设置</h1>
         <p className="mt-1 text-sm text-muted-foreground">计划、API、通知与团队</p>
       </div>
+
+      {billingSuccess ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+          支付成功，套餐已更新
+        </div>
+      ) : null}
 
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-lg border bg-card p-5">
