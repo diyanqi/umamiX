@@ -95,7 +95,9 @@ The proxy rewrites these paths to the normal app and scopes the dashboard to tha
 
 ## Deployment
 
-The repository includes `docker-compose.yml` with `web`, `worker`, `postgres` and `redis` services. Point `APP_URL` at your domain and terminate TLS with a reverse proxy such as Caddy or Traefik.
+`docker-compose.prod.yml` deploys `web`, `worker` and `redis` and expects PostgreSQL to be managed externally on the server (or by your hosting provider). Set `DATABASE_URL` in `.env` to that database, point `APP_URL` at your domain, and terminate TLS with a reverse proxy such as Caddy or Traefik. The web service applies Prisma migrations and seeds the plans on startup.
+
+If migration fails with `type "OrgRole" does not exist`, the target database has stale or partial migration state. Point `DATABASE_URL` at a fresh database, or clear the old schema, then start again.
 
 ## Plans
 
