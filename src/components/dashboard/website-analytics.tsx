@@ -51,6 +51,13 @@ const periods = [
   { days: 90, label: "90 天" },
 ];
 
+type FilterState = {
+  path?: string;
+  country?: string;
+  browser?: string;
+  device?: string;
+};
+
 export function WebsiteAnalytics({
   websiteId,
   initialStats,
@@ -61,14 +68,23 @@ export function WebsiteAnalytics({
   const [stats, setStats] = useState<Stats>(initialStats);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(false);
+  const [filters, setFilters] = useState<FilterState>({});
+  const [applied, setApplied] = useState<FilterState>({});
 
   const load = useCallback(
     async (nextDays: number) => {
       setLoading(true);
       try {
-        const response = await fetch(
-          `/api/stats?websiteId=${websiteId}&days=${nextDays}&compare=1`,
-        );
+        const search = new URLSearchParams({
+          websiteId,
+          days: String(nextDays),
+          compare: "1",
+        });
+        if (applied.path) search.set("path", applied.path);
+        if (applied.country) search.set("country", applied.country);
+        if (applied.browser) search.set("browser", applied.browser);
+        if (applied.device) search.set("device", applied.device);
+        const response = await fetch(`/api/stats?${search.toString()}`);
         if (response.ok) {
           const data = (await response.json()) as Stats;
           setStats(data);
@@ -77,12 +93,21 @@ export function WebsiteAnalytics({
         setLoading(false);
       }
     },
-    [websiteId],
+    [websiteId, applied],
   );
 
   useEffect(() => {
     void load(days);
   }, [days, load]);
+
+  function applyFilters() {
+    setApplied({ ...filters });
+  }
+
+  function resetFilters() {
+    setFilters({});
+    setApplied({});
+  }
 
   const { overview } = stats;
   const changePercent = (current: number, previous: number) => {
@@ -113,6 +138,57 @@ export function WebsiteAnalytics({
           </div>
         </div>
         {loading ? <span className="text-xs text-muted-foreground">加载中...</span> : null}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-card p-3">
+        <div className="space-y-1">
+          <span className="text-xs text-muted-foreground">路径</span>
+          <input
+            value={filters.path ?? ""}
+            onChange={(event) => setFilters((current) => ({ ...current, path: event.target.value }))}
+            placeholder="/pricing"
+            className="h-8 w-40 rounded-md border border-input bg-background px-2 text-xs"
+          />
+        </div>
+        <div className="space-y-1">
+          <span className="text-xs text-muted-foreground">国家</span>
+          <input
+            value={filters.country ?? ""}
+            onChange={(event) => setFilters((current) => ({ ...current, country: event.target.value }))}
+            placeholder="CN"
+            className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs"
+          />
+        </div>
+        <div className="space-y-1">
+          <span className="text-xs text-muted-foreground">浏览器</span>
+          <input
+            value={filters.browser ?? ""}
+            onChange={(event) => setFilters((current) => ({ ...current, browser: event.target.value }))}
+            placeholder="Chrome"
+            className="h-8 w-28 rounded-md border border-input bg-background px-2 text-xs"
+          />
+        </div>
+        <div className="space-y-1">
+          <span className="text-xs text-muted-foreground">设备</span>
+          <input
+            value={filters.device ?? ""}
+            onChange={(event) => setFilters((current) => ({ ...current, device: event.target.value }))}
+            placeholder="Desktop"
+            className="h-8 w-28 rounded-md border border-input bg-background px-2 text-xs"
+          />
+        </div>
+        <button
+          onClick={applyFilters}
+          className="h-8 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground"
+        >
+          应用筛选
+        </button>
+        <button
+          onClick={resetFilters}
+          className="h-8 rounded-md border px-3 text-xs text-muted-foreground hover:bg-muted"
+        >
+          重置
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
