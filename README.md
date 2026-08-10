@@ -77,7 +77,7 @@ The SDK does not use cookies or fingerprinting. Events are sent to `POST /api/tr
 Every website has a shareable report URL at `/share/{shareId}`.
 Team invitations are issued through `/api/team/invitations`; invited GitHub users can accept at `/invite/{token}` and new registrations with a matching GitHub login are joined automatically.
 
-Billing defaults to a `mock` provider so the platform works self-hosted without payment infrastructure. Set `BILLING_PROVIDER=stripe` plus `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` to enable Stripe Checkout and webhook completion.
+Billing defaults to a `mock` provider so the platform works self-hosted without payment infrastructure. Set `BILLING_PROVIDER=yipay` and configure `YIPAY_GATEWAY_URL`, `YIPAY_PID`, `YIPAY_KEY` and `YIPAY_TYPE` to route plan purchases through the 易支付 gateway. The async notify callback is handled at `/api/billing/webhook` with MD5 signature verification.
 
 ## Instance URLs
 

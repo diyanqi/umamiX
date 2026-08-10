@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { redis } from "@/lib/redis";
 
 export type CheckoutInput = {
   tenantId: string;
@@ -118,7 +119,117 @@ class StripeBillingProvider implements BillingProvider {
   }
 }
 
+function md5(value: string) {
+  return createHash("md5").update(value).digest("hex");
+}
+
+export function signYipayParams(
+  params: Record<string, string>,
+  key: string,
+  mode: "sorted" | "fixed" = "sorted",
+) {
+  if (mode === "fixed") {
+    const { pid, out_trade_no, type, name, money, notify_url, return_url } = params;
+    return md5(`${pid}${out_trade_no}${type}${name}${money}${notify_url}${return_url}${key}`);
+  }
+  const sorted = Object.keys(params)
+    .sort()
+    .map((name) => `${name}=${params[name]}`)
+    .join("&");
+  return md5(`${sorted}${key}`);
+}
+
+class YipayBillingProvider implements BillingProvider {
+  private readonly gateway = process.env.YIPAY_GATEWAY_URL;
+  private readonly pid = process.env.YIPAY_PID;
+  private readonly key = process.env.YIPAY_KEY;
+  private readonly payType = process.env.YIPAY_TYPE ?? "wxpay";
+  private readonly signMode = (process.env.YIPAY_SIGN_MODE ?? "sorted") as "sorted" | "fixed";
+
+  async createCheckout(input: CheckoutInput): Promise<CheckoutResult> {
+    if (!this.gateway || !this.pid || !this.key) {
+      throw new Error("YIPAY_GATEWAY_URL, YIPAY_PID and YIPAY_KEY are required");
+    }
+
+    const appUrl = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+    const outTradeNo = `ivf${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
+    const money = (input.priceMonthly / 100).toFixed(2);
+
+    await redis.set(
+      `yipay:order:${outTradeNo}`,
+      JSON.stringify({
+        projectId: input.projectId,
+        planCode: input.planCode,
+        userId: input.userId,
+      }),
+      "EX",
+      3600,
+    );
+
+    const params: Record<string, string> = {
+      pid: this.pid,
+      type: this.payType,
+      out_trade_no: outTradeNo,
+      notify_url: `${appUrl}/api/billing/webhook`,
+      return_url: `${appUrl}/dashboard/settings?billing=success`,
+      name: `Infvar Analytics ${input.planName}`,
+      money,
+      sitename: "Infvar Analytics",
+      sign_type: "MD5",
+    };
+    params.sign = signYipayParams(params, this.key, this.signMode);
+
+    const url = `${this.gateway}?${new URLSearchParams(params).toString()}`;
+    return { url, sessionId: outTradeNo };
+  }
+
+  async handleWebhook(rawBody: string): Promise<BillingEvent | null> {
+    if (!this.key) return null;
+
+    const params = Object.fromEntries(new URLSearchParams(rawBody));
+    const outTradeNo = params.out_trade_no;
+    const receivedSign = params.sign;
+    if (!outTradeNo || !receivedSign) return null;
+
+    const signParams = { ...params };
+    delete signParams.sign;
+    delete signParams.sign_type;
+    const sortedSign = signYipayParams(signParams, this.key, "sorted");
+    const fixedSign = signYipayParams(signParams, this.key, "fixed");
+    if (receivedSign !== sortedSign && receivedSign !== fixedSign) {
+      return null;
+    }
+
+    const success =
+      ["TRADE_SUCCESS", "success", "1", "completed"].includes(
+        String(params.trade_status ?? ""),
+      ) || String(params.trade_status ?? "").toLowerCase() === "success";
+    if (!success) {
+      return { event: "yipay.failed" };
+    }
+
+    const orderRaw = await redis.get(`yipay:order:${outTradeNo}`);
+    if (!orderRaw) {
+      return { event: "yipay.unknown_order" };
+    }
+
+    await redis.del(`yipay:order:${outTradeNo}`);
+    const order = JSON.parse(orderRaw) as {
+      projectId: string;
+      planCode: string;
+      userId: string;
+    };
+    return {
+      event: "yipay.success",
+      projectId: order.projectId,
+      planCode: order.planCode,
+    };
+  }
+}
+
 export function getBillingProvider(): BillingProvider {
-  const mode = process.env.BILLING_PROVIDER ?? "mock";
-  return mode === "stripe" ? new StripeBillingProvider() : new MockBillingProvider();
+  const mode = process.env.BILLING_PROVIDER ?? "yipay";
+  if (mode === "stripe") return new StripeBillingProvider();
+  if (mode === "yipay") return new YipayBillingProvider();
+  return new MockBillingProvider();
 }
