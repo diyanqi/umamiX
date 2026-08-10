@@ -1,0 +1,564 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  ANALYST
+  VIEWER
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum NotificationKind {
+  TRAFFIC_ANOMALY
+  DAILY_STATS
+  WEEKLY_REPORT
+  QUOTA_WARNING
+  SECURITY_EVENT
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum UsageMetric {
+  PAGEVIEWS
+  EVENTS
+  SESSIONS
+  VISITORS
+  AI_CALLS
+  API_CALLS
+}
+
+enum ReportKind {
+  FUNNEL
+  RETENTION
+  UTM
+  GOALS
+  JOURNEY
+  ATTRIBUTION
+}
+
+enum ApiKeyScope {
+  ANALYTICS_READ
+  ANALYTICS_WRITE
+  API_READ
+  API_WRITE
+  MANAGER
+}
+
+enum GoalType {
+  EVENT
+  PAGEVIEW
+}
+
+enum GoalOperator {
+  EXACT
+  CONTAINS
+  REGEX
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+model User {
+  id              String    @id @default(cuid())
+  tenantId        String    @unique @default(cuid())
+  githubId        String?   @unique
+  githubLogin     String?
+  githubCreatedAt DateTime?
+  name            String?
+  email           String?   @unique
+  emailVerified   DateTime?
+  image           String?
+  isActive        Boolean   @default(true)
+
+  accounts            Account[]
+  sessionTokens       SessionToken[]
+  memberships         Membership[]
+  ownedOrganizations  Organization[] @relation("OrganizationOwner")
+  projects            Project[]      @relation("ProjectOwner")
+  websites            Website[]      @relation("WebsiteOwner")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Organization {
+  id       String @id @default(cuid())
+  tenantId String @unique @default(cuid())
+  name     String
+  slug     String @unique
+
+  ownerId String
+  owner   User @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+
+  memberships   Membership[]
+  projects      Project[]
+  subscriptions Subscription[]
+  invitations   Invitation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Invitation {
+  id              String           @id @default(cuid())
+  tenantId        String
+  organizationId  String
+  projectId       String?
+  invitedByUserId String
+  githubLogin     String
+  role            OrgRole          @default(VIEWER)
+  token           String           @unique @default(cuid())
+  status          InvitationStatus @default(PENDING)
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@index([githubLogin, status])
+}
+
+model Membership {
+  id             String   @id @default(cuid())
+  tenantId       String
+  userId         String
+  organizationId String
+  role           OrgRole  @default(VIEWER)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([tenantId])
+}
+
+model Project {
+  id             String @id @default(cuid())
+  tenantId       String
+  userId         String
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+
+  owner        User         @relation("ProjectOwner", fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  websites      Website[]
+  apiKeys       ApiKey[]
+  goals         Goal[]
+  reports       Report[]
+  subscriptions Subscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, slug])
+  @@index([tenantId, userId])
+}
+
+model Website {
+  id             String   @id @default(cuid())
+  tenantId       String
+  userId         String
+  projectId      String
+  name           String
+  domain         String
+  shareId        String   @unique @default(cuid())
+  isActive       Boolean  @default(true)
+
+  owner   User    @relation("WebsiteOwner", fields: [userId], references: [id])
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  sessions   Session[]
+  pageviews  Pageview[]
+  events     Event[]
+  goals      Goal[]
+  reports    Report[]
+  dailyStats DailyMetric[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, tenantId])
+  @@index([userId])
+}
+
+model Session {
+  id              String   @id @default(cuid())
+  tenantId        String
+  userId          String
+  projectId       String
+  websiteId       String
+  visitorId       String
+  sessionKey      String
+
+  startedAt       DateTime @default(now())
+  endedAt         DateTime?
+  durationSeconds Int      @default(0)
+  isBounce        Boolean  @default(false)
+
+  entryPath    String?
+  exitPath     String?
+  referrer     String?
+  referrerDomain String?
+  utmSource    String?
+  utmMedium    String?
+  utmCampaign  String?
+  utmTerm      String?
+  utmContent   String?
+
+  country  String?
+  region   String?
+  city     String?
+  language String?
+  browser  String?
+  os       String?
+  device   String?
+  screen   String?
+
+  pageviewCount Int @default(0)
+  eventCount    Int @default(0)
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  pageviews Pageview[]
+  events    Event[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([websiteId, sessionKey])
+  @@index([websiteId, startedAt])
+  @@index([projectId, startedAt])
+  @@index([tenantId])
+}
+
+model Pageview {
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  projectId   String
+  websiteId   String
+  sessionId   String?
+  visitorId   String
+
+  path     String
+  url      String?
+  title    String?
+  referrer String?
+  referrerDomain String?
+
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmTerm     String?
+  utmContent  String?
+
+  country  String?
+  region   String?
+  city     String?
+  language String?
+  browser  String?
+  os       String?
+  device   String?
+  screen   String?
+
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId, timestamp])
+  @@index([projectId, timestamp])
+  @@index([tenantId, visitorId])
+}
+
+model Event {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  projectId String
+  websiteId String
+  sessionId String?
+  visitorId String
+
+  name       String
+  properties Json?
+  url        String?
+  referrer   String?
+  referrerDomain String?
+
+  country  String?
+  region   String?
+  city     String?
+  language String?
+  browser  String?
+  os       String?
+  device   String?
+  screen   String?
+
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId, name, timestamp])
+  @@index([projectId, timestamp])
+  @@index([tenantId, visitorId])
+}
+
+model Goal {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  projectId String
+  websiteId String
+  name      String
+  type      GoalType   @default(EVENT)
+  value     String
+  operator  GoalOperator @default(EXACT)
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([websiteId])
+}
+
+model Report {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  projectId String
+  websiteId String?
+  name      String
+  kind      ReportKind @default(FUNNEL)
+  config    Json
+
+  website Website? @relation(fields: [websiteId], references: [id], onDelete: SetNull)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+model ApiKey {
+  id        String       @id @default(cuid())
+  tenantId  String
+  userId    String
+  projectId String
+  name      String
+  prefix    String
+  keyHash   String       @unique
+  scopes    ApiKeyScope[]
+  expiresAt DateTime?
+  lastUsedAt DateTime?
+  revokedAt DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, tenantId])
+}
+
+model Plan {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  name           String
+  description    String
+  priceMonthly   Int
+  priceYearly    Int
+  currency       String   @default("CNY")
+  limits         Json
+  features       Json
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+
+  subscriptions Subscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Subscription {
+  id                String             @id @default(cuid())
+  tenantId          String
+  userId            String
+  organizationId    String
+  projectId         String
+  planId            String
+  status            SubscriptionStatus @default(TRIALING)
+  currentPeriodStart DateTime          @default(now())
+  currentPeriodEnd  DateTime
+  cancelAtPeriodEnd Boolean            @default(false)
+  seats             Int                @default(1)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@index([projectId, status])
+}
+
+model UsageRecord {
+  id          String      @id @default(cuid())
+  tenantId    String
+  userId      String
+  projectId   String
+  metric      UsageMetric
+  periodStart DateTime    @db.Date
+  periodEnd   DateTime    @db.Date
+  quantity    Int         @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, metric, periodStart])
+}
+
+model DailyMetric {
+  id        String      @id @default(cuid())
+  tenantId  String
+  userId    String
+  projectId String
+  websiteId String
+  date      DateTime    @db.Date
+  metric    UsageMetric
+  value     Int         @default(0)
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, date, metric])
+}
+
+model Notification {
+  id        String             @id @default(cuid())
+  tenantId  String
+  userId    String
+  projectId String?
+  kind      NotificationKind
+  provider  String             @default("clawdbot")
+  channel   String?
+  title     String
+  body      String
+  payload   Json?
+  status    NotificationStatus @default(PENDING)
+  error     String?
+
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, status])
+  @@index([tenantId, createdAt])
+}
+
+model NotificationSetting {
+  id         String             @id @default(cuid())
+  tenantId   String
+  userId     String
+  projectId  String?
+  provider   String             @default("clawdbot")
+  config     Json
+  enabled    Boolean            @default(true)
+  eventKinds NotificationKind[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, provider, projectId])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  tenantId     String
+  userId       String
+  projectId    String?
+  organizationId String?
+  action       String
+  resourceType String
+  resourceId   String?
+  metadata     Json?
+  ip           String?
+  userAgent    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model SessionToken {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
